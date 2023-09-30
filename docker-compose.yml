@@ -1,0 +1,107 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:13
+    container_name: django-playground-postgres
+    hostname: django-playground-postgres
+    volumes:
+      #- ./dev/web/initial_db/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./dev/data/db:/var/lib/postgresql/data
+    env_file:
+      - dev/envs/.env
+    networks:
+      - internal_network
+    healthcheck:
+      test: [ "CMD", "pg_isready" ]
+      timeout: 45s
+      interval: 10s
+      retries: 10
+
+  web:
+    image: django-playground:latest.dev
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: django-playground
+    hostname: django-playground
+    command: "sh -c /develop/web/entrypoint.sh"
+    volumes:
+      - .:/app
+      - ./requirements:/requirements
+    ports:
+      - "8080:80"
+    env_file:
+      - dev/envs/.env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - internal_network
+
+  celery:
+    image: django-playground:latest.dev
+    command: "sh -c /develop/celery/entrypoint.sh"
+    container_name: django-playground-celery
+    hostname: django-playground-celery
+    volumes:
+      - .:/app
+    depends_on:
+      - web
+    env_file:
+      - dev/envs/.env
+    networks:
+      - internal_network
+
+  elasticsearch:
+    container_name: django-playground-elasticsearch
+    hostname: django-playground-elasticsearch
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.6.0
+    environment:
+      - xpack.security.enabled=false
+      - "discovery.type=single-node"
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    networks:
+      - internal_network
+    ports:
+      - "9201:9200"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9200"]
+      interval: 10s
+      timeout: 2s
+      retries: 10
+
+  redis:
+    container_name: django-playground-redis
+    hostname: django-playground-redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 2s
+      retries: 10
+    image: redis:alpine
+    volumes:
+      - ./data/redis:/data
+    networks:
+      - internal_network
+
+  maildev:
+    image: maildev/maildev
+    container_name: django-playground-maildev
+    hostname: django-playground-maildev
+    ports:
+      - "1081:1080"
+      - "1026:1025"
+    networks:
+      - internal_network
+    environment:
+      - "MAILDEV_INCOMING_USER=dev"
+      - "MAILDEV_INCOMING_PASS=123456"
+
+networks:
+  internal_network:
+    external: false
